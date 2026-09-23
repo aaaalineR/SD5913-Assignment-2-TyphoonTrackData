@@ -6,21 +6,22 @@
 """
 Visualise 2024 Hong Kong Observatory tropical cyclone tracks.
 
-V17 visual design:
+V18 visual design:
 
     - geographic position -> location
-    - trajectory -> movement
-    - arrow direction -> movement direction
+    - trajectory -> movement path
+    - directional strokes -> movement direction
     - colour -> intensity
-    - line width -> fixed
-    - opacity -> fixed
+    - fixed stroke width
+    - subtle guide line underneath
 
-Design goal:
+The main visual language is no longer a continuous line.
 
-    Confident lines + quiet hierarchy.
+Instead, each cyclone is represented by a sequence of
+small directional strokes that collectively form a route.
 
-Weak cyclones remain visible and clear,
-while stronger cyclones receive stronger colour emphasis.
+This is intended to create a movement-field feeling rather
+than a collection of worm-like continuous curves.
 """
 
 import csv
@@ -52,11 +53,6 @@ OUT = HERE / "out"
 # ==================================================
 # INTENSITY COLOUR STYLE
 # ==================================================
-
-# V17:
-# The weak-intensity colours are slightly clearer
-# than V16 so that the tracks feel definite rather
-# than faded or uncertain.
 
 INTENSITY_COLORS = [
     "#a9c2cc",   # TD
@@ -150,8 +146,8 @@ def simplify_track(
     """
     Reduce the number of geographic control points.
 
-    This removes tiny positional changes while
-    preserving the overall movement of the cyclone.
+    Small positional changes are removed while the
+    overall cyclone trajectory is preserved.
     """
 
     if len(points) <= 2:
@@ -204,10 +200,6 @@ def catmull_rom(
 ):
     """
     Generate a smooth curve between p1 and p2.
-
-    V17 uses fewer interpolation steps than V16
-    to keep the trajectory smooth while reducing
-    the overly floating / uncertain appearance.
     """
 
     curve = []
@@ -267,13 +259,12 @@ def catmull_rom(
 def build_intensity_curve(points):
     """
     Build a smooth cyclone trajectory together with
-    a continuously changing intensity value.
+    continuously changing intensity values.
 
-    Geometry:
-        Catmull-Rom spline
+    Returns:
 
-    Intensity:
-        continuously interpolated between control points
+        coordinates
+        intensity values
     """
 
     if len(points) < 2:
@@ -331,7 +322,7 @@ def build_intensity_curve(points):
             )
 
         # ------------------------------------------
-        # Intensity at both ends
+        # Intensity values
         # ------------------------------------------
 
         start_intensity = INTENSITY_RANK[
@@ -355,7 +346,7 @@ def build_intensity_curve(points):
         )
 
         # ------------------------------------------
-        # Interpolate intensity continuously
+        # Interpolate intensity
         # ------------------------------------------
 
         for j, coordinate in enumerate(curve):
@@ -379,7 +370,7 @@ def build_intensity_curve(points):
             )
 
     # ----------------------------------------------
-    # Add final point
+    # Add final coordinate
     # ----------------------------------------------
 
     coordinates.append(
@@ -399,203 +390,197 @@ def build_intensity_curve(points):
 
 
 # ==================================================
-# DRAW CONTINUOUS INTENSITY CURVE
+# DRAW VERY FAINT GUIDE TRAJECTORY
 # ==================================================
 
-def plot_continuous_intensity_curve(
+def draw_guide_trajectory(
     ax,
     coordinates,
-    intensities,
 ):
     """
-    Draw one smooth cyclone trajectory.
+    Draw the complete cyclone trajectory as a very
+    subtle guide.
 
-    V17:
-        - colour represents intensity
-        - line width is fixed
-        - opacity is fixed
-        - lines are slightly more definite
+    This preserves the continuity of the real path
+    without making the continuous line the main
+    visual element.
     """
 
     if len(coordinates) < 2:
         return
 
-    # ----------------------------------------------
-    # Create tiny line segments
-    # ----------------------------------------------
+    ax.plot(
+        [
+            point[0]
+            for point in coordinates
+        ],
+        [
+            point[1]
+            for point in coordinates
+        ],
 
-    segments = []
+        color="#8d9aa0",
 
-    for i in range(
-        len(coordinates) - 1
-    ):
+        linewidth=0.45,
 
-        segments.append(
-            [
-                coordinates[i],
-                coordinates[i + 1],
-            ]
-        )
+        alpha=0.10,
 
-    # ----------------------------------------------
-    # Create LineCollection
-    # ----------------------------------------------
+        transform=ccrs.PlateCarree(),
 
-    collection = LineCollection(
-        segments,
+        solid_capstyle="round",
+        solid_joinstyle="round",
 
-        cmap=INTENSITY_CMAP,
-
-        # V17:
-        # Slightly stronger and more definite
-        # than V16.
-        linewidths=1.1,
-
-        alpha=0.85,
-
-        capstyle="round",
-        joinstyle="round",
-
-        zorder=3,
-    )
-
-    # ----------------------------------------------
-    # Give every segment its intensity value
-    # ----------------------------------------------
-
-    collection.set_array(
-        intensities[:-1]
-    )
-
-    collection.set_clim(
-        0,
-        5,
-    )
-
-    # ----------------------------------------------
-    # Tell Cartopy these are lon/lat coordinates
-    # ----------------------------------------------
-
-    collection.set_transform(
-        ccrs.PlateCarree()
-    )
-
-    # ----------------------------------------------
-    # Add collection to map
-    # ----------------------------------------------
-
-    ax.add_collection(
-        collection
+        zorder=2,
     )
 
 
 # ==================================================
-# DRAW DIRECTION ARROWS
+# DRAW DIRECTIONAL STROKES
 # ==================================================
 
-def add_direction_arrows(
+def draw_directional_strokes(
     ax,
     coordinates,
     intensities,
 ):
     """
-    Add a small number of subtle directional arrows
-    along one cyclone trajectory.
+    Replace the continuous visual line with a sequence
+    of short directional strokes.
 
-    V17:
-        - fewer arrows than V16
-        - smaller arrows
-        - arrows act as directional punctuation
-          rather than a repeated texture
+    The strokes follow the original smooth trajectory.
+
+    Each stroke:
+
+        - has a clear direction
+        - uses the local intensity colour
+        - has a fixed width
+        - is visually separated from the next stroke
+
+    Together, the strokes form the cyclone route.
     """
 
-    if len(coordinates) < 30:
+    if len(coordinates) < 20:
         return
 
-    # ----------------------------------------------
-    # Determine arrow count
-    # ----------------------------------------------
 
-    if len(coordinates) < 90:
+    # ==================================================
+    # DETERMINE STROKE COUNT
+    # ==================================================
 
-        arrow_count = 1
+    # Short trajectories:
+    # fewer strokes
+    #
+    # Long trajectories:
+    # more strokes
 
-    elif len(coordinates) < 180:
+    if len(coordinates) < 80:
 
-        arrow_count = 2
+        stroke_count = 3
+
+    elif len(coordinates) < 150:
+
+        stroke_count = 5
+
+    elif len(coordinates) < 250:
+
+        stroke_count = 7
 
     else:
 
-        arrow_count = 3
+        stroke_count = 9
 
 
-    # ----------------------------------------------
-    # Keep arrows away from both ends
-    # ----------------------------------------------
+    # ==================================================
+    # KEEP STROKES AWAY FROM THE ENDS
+    # ==================================================
 
-    usable_start = int(
-        len(coordinates) * 0.18
+    start_margin = int(
+        len(coordinates) * 0.08
     )
 
-    usable_end = int(
-        len(coordinates) * 0.82
+    end_margin = int(
+        len(coordinates) * 0.08
+    )
+
+    usable_start = start_margin
+
+    usable_end = (
+        len(coordinates)
+        - end_margin
+        - 1
     )
 
     if usable_end <= usable_start:
         return
 
 
-    # ----------------------------------------------
-    # Evenly distribute arrow positions
-    # ----------------------------------------------
+    # ==================================================
+    # DISTANCE BETWEEN STROKES
+    # ==================================================
 
-    positions = []
+    usable_length = (
+        usable_end
+        - usable_start
+    )
+
+    spacing = (
+        usable_length
+        / stroke_count
+    )
+
+
+    # ==================================================
+    # DRAW EACH STROKE
+    # ==================================================
 
     for i in range(
-        arrow_count
+        stroke_count
     ):
 
-        fraction = (
-            i + 1
-        ) / (
-            arrow_count + 1
-        )
+        # ----------------------------------------------
+        # Center position of this directional stroke
+        # ----------------------------------------------
 
-        index = int(
+        center_index = int(
             usable_start
-            + fraction
-            * (
-                usable_end
-                - usable_start
-            )
-        )
-
-        positions.append(
-            index
+            + (
+                i + 0.5
+            ) * spacing
         )
 
 
-    # ----------------------------------------------
-    # Draw each arrow
-    # ----------------------------------------------
+        # ----------------------------------------------
+        # Length of directional stroke
+        # ----------------------------------------------
 
-    for index in positions:
+        stroke_half_length = max(
+            4,
+            int(
+                spacing * 0.18
+            ),
+        )
 
-        # Shorter arrow segment than V16.
-        half_length = 4
 
         start_index = max(
             0,
-            index - half_length,
+            center_index
+            - stroke_half_length,
         )
 
         end_index = min(
             len(coordinates) - 1,
-            index + half_length,
+            center_index
+            + stroke_half_length,
         )
+
 
         if end_index <= start_index:
             continue
+
+
+        # ----------------------------------------------
+        # Coordinates
+        # ----------------------------------------------
 
         start = coordinates[
             start_index
@@ -606,25 +591,34 @@ def add_direction_arrows(
         ]
 
 
-        # ------------------------------------------
-        # Use local intensity for arrow colour
-        # ------------------------------------------
+        # ----------------------------------------------
+        # Local intensity
+        # ----------------------------------------------
 
-        intensity_value = intensities[
-            min(
-                index,
-                len(intensities) - 1,
-            )
-        ]
+        local_index = min(
+            center_index,
+            len(intensities) - 1,
+        )
+
+        intensity_value = (
+            intensities[
+                local_index
+            ]
+        )
+
+
+        # ----------------------------------------------
+        # Convert intensity to colour
+        # ----------------------------------------------
 
         color = INTENSITY_CMAP(
             intensity_value / 5
         )
 
 
-        # ------------------------------------------
-        # Small directional cue
-        # ------------------------------------------
+        # ----------------------------------------------
+        # Create directional stroke
+        # ----------------------------------------------
 
         arrow = FancyArrowPatch(
 
@@ -635,10 +629,11 @@ def add_direction_arrows(
 
             arrowstyle="-|>",
 
-            # Smaller than V16.
-            mutation_scale=5,
+            # Small arrowhead.
+            mutation_scale=5.5,
 
-            linewidth=0.75,
+            # Fixed stroke width.
+            linewidth=1.0,
 
             color=color,
 
@@ -646,6 +641,7 @@ def add_direction_arrows(
 
             zorder=4,
         )
+
 
         ax.add_patch(
             arrow
@@ -713,6 +709,7 @@ def main():
         }
 
         if name not in tracks:
+
             tracks[name] = []
 
         tracks[name].append(
@@ -771,7 +768,7 @@ def main():
 
 
     # ==================================================
-    # VERY LIGHT MAP BACKGROUND
+    # MAP BACKGROUND
     # ==================================================
 
     ax.add_feature(
@@ -798,7 +795,7 @@ def main():
 
 
     # ==================================================
-    # VERY SUBTLE GRID
+    # SUBTLE GRID
     # ==================================================
 
     ax.gridlines(
@@ -817,7 +814,7 @@ def main():
     for name, original_points in tracks.items():
 
         # ----------------------------------------------
-        # Ignore tracks with insufficient observations
+        # Skip invalid tracks
         # ----------------------------------------------
 
         if len(original_points) < 2:
@@ -825,7 +822,7 @@ def main():
 
 
         # ----------------------------------------------
-        # Simplify geographic path
+        # Simplify original observations
         # ----------------------------------------------
 
         simplified = simplify_track(
@@ -843,7 +840,7 @@ def main():
 
         # ----------------------------------------------
         # Build smooth trajectory
-        # + continuous intensity
+        # and continuous intensity
         # ----------------------------------------------
 
         coordinates, intensity_values = (
@@ -858,21 +855,22 @@ def main():
 
 
         # ----------------------------------------------
-        # Draw trajectory
+        # Layer 1:
+        # very faint complete trajectory
         # ----------------------------------------------
 
-        plot_continuous_intensity_curve(
+        draw_guide_trajectory(
             ax,
             coordinates,
-            intensity_values,
         )
 
 
         # ----------------------------------------------
-        # Draw subtle direction arrows
+        # Layer 2:
+        # directional strokes
         # ----------------------------------------------
 
-        add_direction_arrows(
+        draw_directional_strokes(
             ax,
             coordinates,
             intensity_values,
@@ -981,9 +979,9 @@ def main():
                     ]
                 ],
 
-                linewidth=1.1,
+                linewidth=1.0,
 
-                alpha=0.85,
+                alpha=0.90,
 
                 label=intensity,
             )
