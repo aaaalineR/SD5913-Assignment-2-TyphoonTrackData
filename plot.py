@@ -6,7 +6,7 @@
 """
 Visualise 2024 Hong Kong Observatory tropical cyclone tracks.
 
-V16 visual design:
+V17 visual design:
 
     - geographic position -> location
     - trajectory -> movement
@@ -15,8 +15,12 @@ V16 visual design:
     - line width -> fixed
     - opacity -> fixed
 
-The arrows are used as subtle directional cues rather than
-large decorative markers.
+Design goal:
+
+    Confident lines + quiet hierarchy.
+
+Weak cyclones remain visible and clear,
+while stronger cyclones receive stronger colour emphasis.
 """
 
 import csv
@@ -49,10 +53,15 @@ OUT = HERE / "out"
 # INTENSITY COLOUR STYLE
 # ==================================================
 
+# V17:
+# The weak-intensity colours are slightly clearer
+# than V16 so that the tracks feel definite rather
+# than faded or uncertain.
+
 INTENSITY_COLORS = [
-    "#b9c8cf",   # TD
-    "#8baaba",   # TS
-    "#628da4",   # STS
+    "#a9c2cc",   # TD
+    "#789faf",   # TS
+    "#4f829d",   # STS
     "#d69a43",   # T
     "#d5673f",   # ST
     "#9e3033",   # SuperT
@@ -134,7 +143,10 @@ def distance(p1, p2):
 # SIMPLIFY TRACK
 # ==================================================
 
-def simplify_track(points, min_distance=2.5):
+def simplify_track(
+    points,
+    min_distance=2.5,
+):
     """
     Reduce the number of geographic control points.
 
@@ -145,7 +157,9 @@ def simplify_track(points, min_distance=2.5):
     if len(points) <= 2:
         return points
 
-    simplified = [points[0]]
+    simplified = [
+        points[0]
+    ]
 
     last_kept = (
         points[0]["longitude"],
@@ -164,11 +178,15 @@ def simplify_track(points, min_distance=2.5):
             current
         ) >= min_distance:
 
-            simplified.append(point)
+            simplified.append(
+                point
+            )
 
             last_kept = current
 
-    simplified.append(points[-1])
+    simplified.append(
+        points[-1]
+    )
 
     return simplified
 
@@ -182,10 +200,14 @@ def catmull_rom(
     p1,
     p2,
     p3,
-    steps=45,
+    steps=30,
 ):
     """
     Generate a smooth curve between p1 and p2.
+
+    V17 uses fewer interpolation steps than V16
+    to keep the trajectory smooth while reducing
+    the overly floating / uncertain appearance.
     """
 
     curve = []
@@ -260,7 +282,9 @@ def build_intensity_curve(points):
     coordinates = []
     intensities = []
 
-    for i in range(len(points) - 1):
+    for i in range(
+        len(points) - 1
+    ):
 
         # ------------------------------------------
         # Current control points
@@ -327,7 +351,7 @@ def build_intensity_curve(points):
             p1,
             p2,
             p3,
-            steps=45,
+            steps=30,
         )
 
         # ------------------------------------------
@@ -336,7 +360,7 @@ def build_intensity_curve(points):
 
         for j, coordinate in enumerate(curve):
 
-            t = j / 45
+            t = j / 30
 
             intensity_value = (
                 start_intensity
@@ -386,10 +410,11 @@ def plot_continuous_intensity_curve(
     """
     Draw one smooth cyclone trajectory.
 
-    V16:
+    V17:
         - colour represents intensity
         - line width is fixed
         - opacity is fixed
+        - lines are slightly more definite
     """
 
     if len(coordinates) < 2:
@@ -421,13 +446,13 @@ def plot_continuous_intensity_curve(
 
         cmap=INTENSITY_CMAP,
 
-        # Fixed line width.
-        linewidths=1.0,
+        # V17:
+        # Slightly stronger and more definite
+        # than V16.
+        linewidths=1.1,
 
-        # Fixed opacity.
-        alpha=0.75,
+        alpha=0.85,
 
-        # Rounded visual appearance.
         capstyle="round",
         joinstyle="round",
 
@@ -477,40 +502,48 @@ def add_direction_arrows(
     Add a small number of subtle directional arrows
     along one cyclone trajectory.
 
-    The arrows follow the actual trajectory direction.
-    They are intentionally small so that they function
-    as directional cues rather than visual markers.
+    V17:
+        - fewer arrows than V16
+        - smaller arrows
+        - arrows act as directional punctuation
+          rather than a repeated texture
     """
 
-    if len(coordinates) < 20:
+    if len(coordinates) < 30:
         return
 
     # ----------------------------------------------
-    # Determine arrow count from trajectory length
+    # Determine arrow count
     # ----------------------------------------------
 
-    arrow_count = max(
-        2,
-        min(
-            5,
-            len(coordinates) // 80,
-        ),
-    )
+    if len(coordinates) < 90:
+
+        arrow_count = 1
+
+    elif len(coordinates) < 180:
+
+        arrow_count = 2
+
+    else:
+
+        arrow_count = 3
+
 
     # ----------------------------------------------
-    # Leave enough space between arrows
+    # Keep arrows away from both ends
     # ----------------------------------------------
 
     usable_start = int(
-        len(coordinates) * 0.12
+        len(coordinates) * 0.18
     )
 
     usable_end = int(
-        len(coordinates) * 0.88
+        len(coordinates) * 0.82
     )
 
     if usable_end <= usable_start:
         return
+
 
     # ----------------------------------------------
     # Evenly distribute arrow positions
@@ -518,7 +551,9 @@ def add_direction_arrows(
 
     positions = []
 
-    for i in range(arrow_count):
+    for i in range(
+        arrow_count
+    ):
 
         fraction = (
             i + 1
@@ -535,7 +570,10 @@ def add_direction_arrows(
             )
         )
 
-        positions.append(index)
+        positions.append(
+            index
+        )
+
 
     # ----------------------------------------------
     # Draw each arrow
@@ -543,8 +581,8 @@ def add_direction_arrows(
 
     for index in positions:
 
-        # Size of the small arrow segment.
-        half_length = 5
+        # Shorter arrow segment than V16.
+        half_length = 4
 
         start_index = max(
             0,
@@ -567,8 +605,9 @@ def add_direction_arrows(
             end_index
         ]
 
+
         # ------------------------------------------
-        # Use the local intensity for arrow colour
+        # Use local intensity for arrow colour
         # ------------------------------------------
 
         intensity_value = intensities[
@@ -582,8 +621,9 @@ def add_direction_arrows(
             intensity_value / 5
         )
 
+
         # ------------------------------------------
-        # Small subtle arrow
+        # Small directional cue
         # ------------------------------------------
 
         arrow = FancyArrowPatch(
@@ -595,13 +635,14 @@ def add_direction_arrows(
 
             arrowstyle="-|>",
 
-            mutation_scale=6,
+            # Smaller than V16.
+            mutation_scale=5,
 
-            linewidth=0.65,
+            linewidth=0.75,
 
             color=color,
 
-            alpha=0.85,
+            alpha=0.90,
 
             zorder=4,
         )
@@ -940,9 +981,9 @@ def main():
                     ]
                 ],
 
-                linewidth=1.0,
+                linewidth=1.1,
 
-                alpha=0.75,
+                alpha=0.85,
 
                 label=intensity,
             )
