@@ -3,76 +3,36 @@
 # dependencies = ["matplotlib", "cartopy"]
 # ///
 
-"""
-Visualise 2024 Hong Kong Observatory tropical cyclone tracks.
-
-V18 visual design:
-
-    - geographic position -> location
-    - trajectory -> movement path
-    - directional strokes -> movement direction
-    - colour -> intensity
-    - fixed stroke width
-    - subtle guide line underneath
-
-The main visual language is no longer a continuous line.
-
-Instead, each cyclone is represented by a sequence of
-small directional strokes that collectively form a route.
-
-This is intended to create a movement-field feeling rather
-than a collection of worm-like continuous curves.
-"""
-
 import csv
 from datetime import datetime
 from pathlib import Path
+import math
 
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
 from matplotlib.lines import Line2D
-from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import FancyArrowPatch
 
 
-# ==================================================
+# ============================================================
 # FILE SETTINGS
-# ==================================================
+# ============================================================
 
 FILE = "HKO2024BST.csv"
 PICTURE = "plot.png"
 
 HERE = Path(__file__).parent
+
 DATA = HERE / "data" / FILE
 OUT = HERE / "out"
 
 
-# ==================================================
-# INTENSITY COLOUR STYLE
-# ==================================================
-
-INTENSITY_COLORS = [
-    "#a9c2cc",   # TD
-    "#789faf",   # TS
-    "#4f829d",   # STS
-    "#d69a43",   # T
-    "#d5673f",   # ST
-    "#9e3033",   # SuperT
-]
-
-INTENSITY_CMAP = LinearSegmentedColormap.from_list(
-    "cyclone_intensity",
-    INTENSITY_COLORS,
-    N=256,
-)
-
-
-# ==================================================
-# INTENSITY RANK
-# ==================================================
+# ============================================================
+# INTENSITY
+# ============================================================
 
 INTENSITY_RANK = {
     "TD": 0,
@@ -84,9 +44,27 @@ INTENSITY_RANK = {
 }
 
 
-# ==================================================
-# HIGHLIGHTED CYCLONES
-# ==================================================
+# Blue -> yellow -> orange -> red
+INTENSITY_COLORS = [
+    "#8fb6c4",   # TD
+    "#609bb0",   # TS
+    "#3f819c",   # STS
+    "#d39a43",   # T
+    "#d7663f",   # ST
+    "#a13a3d",   # SuperT
+]
+
+
+INTENSITY_CMAP = LinearSegmentedColormap.from_list(
+    "cyclone_intensity",
+    INTENSITY_COLORS,
+    N=256,
+)
+
+
+# ============================================================
+# LABELS
+# ============================================================
 
 HIGHLIGHT_NAMES = {
     "YAGI",
@@ -96,14 +74,11 @@ HIGHLIGHT_NAMES = {
 }
 
 
-# ==================================================
+# ============================================================
 # READ CSV
-# ==================================================
+# ============================================================
 
 def rows(path):
-    """
-    Keep only tropical cyclone observation rows.
-    """
 
     kept = []
 
@@ -114,41 +89,37 @@ def rows(path):
 
         for line in csv.reader(handle):
 
-            if len(line) >= 12 and line[1].isdigit():
+            if (
+                len(line) >= 12
+                and line[1].isdigit()
+            ):
                 kept.append(line)
 
     return kept
 
 
-# ==================================================
+# ============================================================
 # DISTANCE
-# ==================================================
+# ============================================================
 
 def distance(p1, p2):
-    """
-    Simple distance in longitude/latitude space.
-    """
 
     dx = p2[0] - p1[0]
     dy = p2[1] - p1[1]
 
-    return (dx * dx + dy * dy) ** 0.5
+    return math.sqrt(
+        dx * dx + dy * dy
+    )
 
 
-# ==================================================
+# ============================================================
 # SIMPLIFY TRACK
-# ==================================================
+# ============================================================
 
 def simplify_track(
     points,
     min_distance=2.5,
 ):
-    """
-    Reduce the number of geographic control points.
-
-    Small positional changes are removed while the
-    overall cyclone trajectory is preserved.
-    """
 
     if len(points) <= 2:
         return points
@@ -187,9 +158,9 @@ def simplify_track(
     return simplified
 
 
-# ==================================================
+# ============================================================
 # CATMULL-ROM SPLINE
-# ==================================================
+# ============================================================
 
 def catmull_rom(
     p0,
@@ -198,9 +169,6 @@ def catmull_rom(
     p3,
     steps=30,
 ):
-    """
-    Generate a smooth curve between p1 and p2.
-    """
 
     curve = []
 
@@ -252,34 +220,20 @@ def catmull_rom(
     return curve
 
 
-# ==================================================
-# BUILD SMOOTH TRACK + CONTINUOUS INTENSITY
-# ==================================================
+# ============================================================
+# BUILD SMOOTH TRACK
+# ============================================================
 
-def build_intensity_curve(points):
-    """
-    Build a smooth cyclone trajectory together with
-    continuously changing intensity values.
-
-    Returns:
-
-        coordinates
-        intensity values
-    """
+def build_smooth_track(points):
 
     if len(points) < 2:
-        return [], []
+        return []
 
     coordinates = []
-    intensities = []
 
     for i in range(
         len(points) - 1
     ):
-
-        # ------------------------------------------
-        # Current control points
-        # ------------------------------------------
 
         p1 = (
             points[i]["longitude"],
@@ -290,10 +244,6 @@ def build_intensity_curve(points):
             points[i + 1]["longitude"],
             points[i + 1]["latitude"],
         )
-
-        # ------------------------------------------
-        # Previous control point
-        # ------------------------------------------
 
         if i == 0:
 
@@ -306,10 +256,6 @@ def build_intensity_curve(points):
                 points[i - 1]["latitude"],
             )
 
-        # ------------------------------------------
-        # Next control point
-        # ------------------------------------------
-
         if i + 2 >= len(points):
 
             p3 = p2
@@ -321,22 +267,6 @@ def build_intensity_curve(points):
                 points[i + 2]["latitude"],
             )
 
-        # ------------------------------------------
-        # Intensity values
-        # ------------------------------------------
-
-        start_intensity = INTENSITY_RANK[
-            points[i]["intensity"]
-        ]
-
-        end_intensity = INTENSITY_RANK[
-            points[i + 1]["intensity"]
-        ]
-
-        # ------------------------------------------
-        # Generate smooth geometry
-        # ------------------------------------------
-
         curve = catmull_rom(
             p0,
             p1,
@@ -345,33 +275,9 @@ def build_intensity_curve(points):
             steps=30,
         )
 
-        # ------------------------------------------
-        # Interpolate intensity
-        # ------------------------------------------
-
-        for j, coordinate in enumerate(curve):
-
-            t = j / 30
-
-            intensity_value = (
-                start_intensity
-                + (
-                    end_intensity
-                    - start_intensity
-                ) * t
-            )
-
-            coordinates.append(
-                coordinate
-            )
-
-            intensities.append(
-                intensity_value
-            )
-
-    # ----------------------------------------------
-    # Add final coordinate
-    # ----------------------------------------------
+        coordinates.extend(
+            curve
+        )
 
     coordinates.append(
         (
@@ -380,317 +286,539 @@ def build_intensity_curve(points):
         )
     )
 
-    intensities.append(
+    return coordinates
+
+
+# ============================================================
+# BUILD CONTINUOUS INTENSITY VALUES
+# ============================================================
+
+def build_intensity_values(
+    points,
+    coordinate_count,
+):
+
+    if len(points) < 2:
+        return []
+
+    values = []
+
+    for i in range(
+        len(points) - 1
+    ):
+
+        start_value = INTENSITY_RANK[
+            points[i]["intensity"]
+        ]
+
+        end_value = INTENSITY_RANK[
+            points[i + 1]["intensity"]
+        ]
+
+        for j in range(30):
+
+            t = j / 30
+
+            value = (
+                start_value
+                + (
+                    end_value
+                    - start_value
+                ) * t
+            )
+
+            values.append(
+                value
+            )
+
+    values.append(
         INTENSITY_RANK[
             points[-1]["intensity"]
         ]
     )
 
-    return coordinates, intensities
+    if len(values) > coordinate_count:
+
+        values = values[
+            :coordinate_count
+        ]
+
+    while len(values) < coordinate_count:
+
+        values.append(
+            values[-1]
+        )
+
+    return values
 
 
-# ==================================================
-# DRAW VERY FAINT GUIDE TRAJECTORY
-# ==================================================
+# ============================================================
+# CUMULATIVE DISTANCE
+# ============================================================
 
-def draw_guide_trajectory(
+def cumulative_distances(
+    coordinates
+):
+
+    distances = [0.0]
+
+    total = 0.0
+
+    for i in range(
+        1,
+        len(coordinates)
+    ):
+
+        total += distance(
+            coordinates[i - 1],
+            coordinates[i]
+        )
+
+        distances.append(
+            total
+        )
+
+    return distances
+
+
+# ============================================================
+# POINT AT DISTANCE
+# ============================================================
+
+def point_at_distance(
+    coordinates,
+    cumulative,
+    target,
+):
+
+    if target <= 0:
+
+        return (
+            coordinates[0],
+            0,
+        )
+
+    if target >= cumulative[-1]:
+
+        return (
+            coordinates[-1],
+            len(coordinates) - 1,
+        )
+
+    for i in range(
+        1,
+        len(cumulative)
+    ):
+
+        if cumulative[i] >= target:
+
+            previous_distance = (
+                cumulative[i - 1]
+            )
+
+            current_distance = (
+                cumulative[i]
+            )
+
+            segment_length = (
+                current_distance
+                - previous_distance
+            )
+
+            if segment_length == 0:
+
+                return (
+                    coordinates[i],
+                    i,
+                )
+
+            t = (
+                target
+                - previous_distance
+            ) / segment_length
+
+            x = (
+                coordinates[i - 1][0]
+                + (
+                    coordinates[i][0]
+                    - coordinates[i - 1][0]
+                ) * t
+            )
+
+            y = (
+                coordinates[i - 1][1]
+                + (
+                    coordinates[i][1]
+                    - coordinates[i - 1][1]
+                ) * t
+            )
+
+            return (
+                (x, y),
+                i,
+            )
+
+    return (
+        coordinates[-1],
+        len(coordinates) - 1,
+    )
+
+
+# ============================================================
+# DRAW SUBTLE ROUTE
+# ============================================================
+
+def draw_subtle_route(
     ax,
     coordinates,
 ):
-    """
-    Draw the complete cyclone trajectory as a very
-    subtle guide.
-
-    This preserves the continuity of the real path
-    without making the continuous line the main
-    visual element.
-    """
 
     if len(coordinates) < 2:
         return
 
     ax.plot(
+
         [
-            point[0]
-            for point in coordinates
-        ],
-        [
-            point[1]
-            for point in coordinates
+            p[0]
+            for p in coordinates
         ],
 
-        color="#8d9aa0",
+        [
+            p[1]
+            for p in coordinates
+        ],
+
+        color="#50717d",
 
         linewidth=0.45,
 
-        alpha=0.10,
+        alpha=0.13,
 
         transform=ccrs.PlateCarree(),
 
         solid_capstyle="round",
+
         solid_joinstyle="round",
 
         zorder=2,
     )
 
 
-# ==================================================
-# DRAW DIRECTIONAL STROKES
-# ==================================================
+# ============================================================
+# DRAW SHORT THICK ARROW
+# ============================================================
 
-def draw_directional_strokes(
+def draw_arrow(
+    ax,
+    start,
+    end,
+    color,
+):
+
+    arrow = FancyArrowPatch(
+
+        start,
+        end,
+
+        transform=ccrs.PlateCarree(),
+
+        # Compact arrow shape
+        arrowstyle="-|>",
+
+        # Make the arrow head visually stronger
+        mutation_scale=9.5,
+
+        # Thick but short
+        linewidth=2.15,
+
+        color=color,
+
+        alpha=0.95,
+
+        zorder=5,
+    )
+
+    ax.add_patch(
+        arrow
+    )
+
+
+# ============================================================
+# DRAW ARROW FIELD
+# ============================================================
+
+def draw_arrow_field(
     ax,
     coordinates,
     intensities,
 ):
-    """
-    Replace the continuous visual line with a sequence
-    of short directional strokes.
 
-    The strokes follow the original smooth trajectory.
+    if len(coordinates) < 2:
+        return
 
-    Each stroke:
+    cumulative = (
+        cumulative_distances(
+            coordinates
+        )
+    )
 
-        - has a clear direction
-        - uses the local intensity colour
-        - has a fixed width
-        - is visually separated from the next stroke
+    total_length = cumulative[-1]
 
-    Together, the strokes form the cyclone route.
-    """
-
-    if len(coordinates) < 20:
+    if total_length <= 0:
         return
 
 
-    # ==================================================
-    # DETERMINE STROKE COUNT
-    # ==================================================
-
-    # Short trajectories:
-    # fewer strokes
+    # ========================================================
+    # V23
     #
-    # Long trajectories:
-    # more strokes
+    # More arrows
+    # Shorter arrows
+    #
+    # The route should read like:
+    #
+    #       →  →  →  →  →  →  →
+    #
+    # instead of:
+    #
+    #       ----------->
+    #                ----------->
+    #
+    # ========================================================
 
-    if len(coordinates) < 80:
+    arrow_spacing = 2.45
 
-        stroke_count = 3
 
-    elif len(coordinates) < 150:
+    arrow_count = int(
+        total_length
+        / arrow_spacing
+    )
 
-        stroke_count = 5
 
-    elif len(coordinates) < 250:
+    # Prevent too few arrows
+    arrow_count = max(
+        4,
+        arrow_count,
+    )
 
-        stroke_count = 7
+
+    # Prevent excessive clutter
+    arrow_count = min(
+        18,
+        arrow_count,
+    )
+
+
+    # ========================================================
+    # MARGINS
+    # ========================================================
+
+    margin = (
+        total_length
+        * 0.04
+    )
+
+
+    usable_length = (
+        total_length
+        - margin * 2
+    )
+
+
+    if usable_length <= 0:
+        return
+
+
+    # ========================================================
+    # EVENLY DISTRIBUTED ARROWS
+    # ========================================================
+
+    if arrow_count == 1:
+
+        targets = [
+            total_length / 2
+        ]
 
     else:
 
-        stroke_count = 9
+        spacing = (
+            usable_length
+            / (
+                arrow_count - 1
+            )
+        )
+
+        targets = [
+
+            margin
+            + spacing * i
+
+            for i in range(
+                arrow_count
+            )
+        ]
 
 
-    # ==================================================
-    # KEEP STROKES AWAY FROM THE ENDS
-    # ==================================================
+    # ========================================================
+    # DRAW
+    # ========================================================
 
-    start_margin = int(
-        len(coordinates) * 0.08
-    )
+    for target in targets:
 
-    end_margin = int(
-        len(coordinates) * 0.08
-    )
-
-    usable_start = start_margin
-
-    usable_end = (
-        len(coordinates)
-        - end_margin
-        - 1
-    )
-
-    if usable_end <= usable_start:
-        return
-
-
-    # ==================================================
-    # DISTANCE BETWEEN STROKES
-    # ==================================================
-
-    usable_length = (
-        usable_end
-        - usable_start
-    )
-
-    spacing = (
-        usable_length
-        / stroke_count
-    )
-
-
-    # ==================================================
-    # DRAW EACH STROKE
-    # ==================================================
-
-    for i in range(
-        stroke_count
-    ):
-
-        # ----------------------------------------------
-        # Center position of this directional stroke
-        # ----------------------------------------------
-
-        center_index = int(
-            usable_start
-            + (
-                i + 0.5
-            ) * spacing
+        center, index = (
+            point_at_distance(
+                coordinates,
+                cumulative,
+                target,
+            )
         )
 
 
-        # ----------------------------------------------
-        # Length of directional stroke
-        # ----------------------------------------------
+        # ====================================================
+        # V23 SHORT ARROW
+        # ====================================================
+        #
+        # Much shorter than V22.
+        #
+        # This is the most important visual change.
+        # ====================================================
 
-        stroke_half_length = max(
-            4,
-            int(
-                spacing * 0.18
-            ),
+        half_length = min(
+
+            total_length * 0.026,
+
+            0.85,
         )
 
 
-        start_index = max(
+        start_target = max(
             0,
-            center_index
-            - stroke_half_length,
-        )
-
-        end_index = min(
-            len(coordinates) - 1,
-            center_index
-            + stroke_half_length,
+            target
+            - half_length,
         )
 
 
-        if end_index <= start_index:
-            continue
+        end_target = min(
+            total_length,
+            target
+            + half_length,
+        )
 
 
-        # ----------------------------------------------
-        # Coordinates
-        # ----------------------------------------------
-
-        start = coordinates[
-            start_index
-        ]
-
-        end = coordinates[
-            end_index
-        ]
+        start, _ = (
+            point_at_distance(
+                coordinates,
+                cumulative,
+                start_target,
+            )
+        )
 
 
-        # ----------------------------------------------
-        # Local intensity
-        # ----------------------------------------------
+        end, _ = (
+            point_at_distance(
+                coordinates,
+                cumulative,
+                end_target,
+            )
+        )
 
-        local_index = min(
-            center_index,
+
+        # ====================================================
+        # INTENSITY COLOUR
+        # ====================================================
+
+        index = min(
+            index,
             len(intensities) - 1,
         )
 
-        intensity_value = (
-            intensities[
-                local_index
-            ]
+
+        intensity = (
+            intensities[index]
         )
 
-
-        # ----------------------------------------------
-        # Convert intensity to colour
-        # ----------------------------------------------
 
         color = INTENSITY_CMAP(
-            intensity_value / 5
+            intensity / 5
         )
 
 
-        # ----------------------------------------------
-        # Create directional stroke
-        # ----------------------------------------------
+        # ====================================================
+        # DRAW ARROW
+        # ====================================================
 
-        arrow = FancyArrowPatch(
+        draw_arrow(
+
+            ax,
 
             start,
+
             end,
 
-            transform=ccrs.PlateCarree(),
-
-            arrowstyle="-|>",
-
-            # Small arrowhead.
-            mutation_scale=5.5,
-
-            # Fixed stroke width.
-            linewidth=1.0,
-
-            color=color,
-
-            alpha=0.90,
-
-            zorder=4,
+            color,
         )
 
 
-        ax.add_patch(
-            arrow
-        )
-
-
-# ==================================================
+# ============================================================
 # MAIN
-# ==================================================
+# ============================================================
 
 def main():
 
-    # ==================================================
+    # ========================================================
     # READ DATA
-    # ==================================================
+    # ========================================================
 
-    table = rows(DATA)
+    table = rows(
+        DATA
+    )
 
     print(
         f"{DATA.name}: "
         f"{len(table)} rows. "
-        f"The first one: {table[0]}"
+        f"The first one: "
+        f"{table[0]}"
     )
 
 
-    # ==================================================
-    # GROUP OBSERVATIONS BY CYCLONE
-    # ==================================================
+    # ========================================================
+    # GROUP CYCLONES
+    # ========================================================
 
     tracks = {}
+
 
     for row in table:
 
         name = row[0]
 
-        year = int(row[1])
-        month = int(row[2])
-        day = int(row[3])
-        hour = int(row[4])
+        year = int(
+            row[1]
+        )
+
+        month = int(
+            row[2]
+        )
+
+        day = int(
+            row[3]
+        )
+
+        hour = int(
+            row[4]
+        )
 
         intensity = row[5]
 
-        latitude = int(
-            row[6]
-        ) / 100
+        latitude = (
+            int(row[6])
+            / 100
+        )
 
-        longitude = int(
-            row[7]
-        ) / 100
+        longitude = (
+            int(row[7])
+            / 100
+        )
+
 
         point = {
 
@@ -708,18 +836,20 @@ def main():
             "longitude": longitude,
         }
 
+
         if name not in tracks:
 
             tracks[name] = []
+
 
         tracks[name].append(
             point
         )
 
 
-    # ==================================================
-    # SORT CHRONOLOGICALLY
-    # ==================================================
+    # ========================================================
+    # SORT BY TIME
+    # ========================================================
 
     for points in tracks.values():
 
@@ -734,24 +864,26 @@ def main():
     )
 
 
-    # ==================================================
-    # CREATE FIGURE
-    # ==================================================
+    # ========================================================
+    # FIGURE
+    # ========================================================
 
     fig = plt.figure(
         figsize=(12, 7)
     )
+
 
     ax = plt.axes(
         projection=ccrs.PlateCarree()
     )
 
 
-    # ==================================================
+    # ========================================================
     # MAP EXTENT
-    # ==================================================
+    # ========================================================
 
     ax.set_extent(
+
         [
             100,
             180,
@@ -762,89 +894,120 @@ def main():
         crs=ccrs.PlateCarree()
     )
 
+
     ax.set_aspect(
         "equal"
     )
 
 
-    # ==================================================
+    # ========================================================
     # MAP BACKGROUND
-    # ==================================================
+    # ========================================================
+
+    # Ocean
 
     ax.add_feature(
+
         cfeature.OCEAN,
-        facecolor="#f8f9fa",
+
+        facecolor="#d9dddf",
+
         zorder=0,
     )
 
+
+    # Land
+
     ax.add_feature(
+
         cfeature.LAND,
-        facecolor="#eceeef",
-        edgecolor="#c9ced1",
-        linewidth=0.45,
+
+        facecolor="#f1f2f2",
+
+        edgecolor="#ffffff",
+
+        linewidth=0.65,
+
         zorder=0,
     )
 
+
+    # Coastline
+
     ax.add_feature(
+
         cfeature.COASTLINE,
-        edgecolor="#aeb6ba",
-        linewidth=0.5,
-        alpha=0.65,
+
+        edgecolor="#ffffff",
+
+        linewidth=0.75,
+
+        alpha=0.85,
+
         zorder=1,
     )
 
 
-    # ==================================================
-    # SUBTLE GRID
-    # ==================================================
+    # ========================================================
+    # GRID
+    # ========================================================
 
     ax.gridlines(
+
         draw_labels=False,
-        linewidth=0.35,
-        color="#9aa5aa",
-        alpha=0.12,
+
+        linewidth=0.25,
+
+        color="#ffffff",
+
+        alpha=0.25,
+
         linestyle="-",
     )
 
 
-    # ==================================================
-    # DRAW CYCLONE FIELD
-    # ==================================================
+    # ========================================================
+    # DRAW CYCLONES
+    # ========================================================
 
     for name, original_points in tracks.items():
-
-        # ----------------------------------------------
-        # Skip invalid tracks
-        # ----------------------------------------------
 
         if len(original_points) < 2:
             continue
 
 
-        # ----------------------------------------------
-        # Simplify original observations
-        # ----------------------------------------------
+        # ----------------------------------------------------
+        # Simplify
+        # ----------------------------------------------------
 
-        simplified = simplify_track(
-            original_points,
-            min_distance=2.5,
+        simplified = (
+            simplify_track(
+
+                original_points,
+
+                min_distance=2.5,
+            )
         )
 
 
         print(
+
             f"{name}: "
+
             f"{len(original_points)} observations "
-            f"-> {len(simplified)} control points"
+
+            f"-> "
+
+            f"{len(simplified)} control points"
         )
 
 
-        # ----------------------------------------------
-        # Build smooth trajectory
-        # and continuous intensity
-        # ----------------------------------------------
+        # ----------------------------------------------------
+        # Smooth route
+        # ----------------------------------------------------
 
-        coordinates, intensity_values = (
-            build_intensity_curve(
+        coordinates = (
+            build_smooth_track(
                 simplified
             )
         )
@@ -854,32 +1017,49 @@ def main():
             continue
 
 
-        # ----------------------------------------------
-        # Layer 1:
-        # very faint complete trajectory
-        # ----------------------------------------------
+        # ----------------------------------------------------
+        # Intensity
+        # ----------------------------------------------------
 
-        draw_guide_trajectory(
+        intensities = (
+            build_intensity_values(
+
+                simplified,
+
+                len(coordinates),
+            )
+        )
+
+
+        # ====================================================
+        # SUBTLE CONTINUOUS ROUTE
+        # ====================================================
+
+        draw_subtle_route(
+
             ax,
+
             coordinates,
         )
 
 
-        # ----------------------------------------------
-        # Layer 2:
-        # directional strokes
-        # ----------------------------------------------
+        # ====================================================
+        # SHORT DENSE ARROWS
+        # ====================================================
 
-        draw_directional_strokes(
+        draw_arrow_field(
+
             ax,
+
             coordinates,
-            intensity_values,
+
+            intensities,
         )
 
 
-    # ==================================================
-    # LABEL ONLY FOUR CYCLONES
-    # ==================================================
+    # ========================================================
+    # LABELS
+    # ========================================================
 
     label_offsets = {
 
@@ -910,11 +1090,16 @@ def main():
         if name not in tracks:
             continue
 
+
         last = tracks[name][-1]
 
-        offset = label_offsets[name]
+        offset = label_offsets[
+            name
+        ]
+
 
         ax.annotate(
+
             name,
 
             (
@@ -934,15 +1119,16 @@ def main():
 
             transform=ccrs.PlateCarree(),
 
-            zorder=6,
+            zorder=7,
         )
 
 
-    # ==================================================
+    # ========================================================
     # TITLE
-    # ==================================================
+    # ========================================================
 
     ax.set_title(
+
         "Tropical Cyclone Journeys · 2024",
 
         fontsize=18,
@@ -953,23 +1139,28 @@ def main():
     )
 
 
-    # ==================================================
-    # INTENSITY LEGEND
-    # ==================================================
+    # ========================================================
+    # LEGEND
+    # ========================================================
 
     legend_items = []
 
+
     for intensity in [
+
         "TD",
         "TS",
         "STS",
         "T",
         "ST",
         "SuperT",
+
     ]:
 
         legend_items.append(
+
             Line2D(
+
                 [0],
                 [0],
 
@@ -979,9 +1170,9 @@ def main():
                     ]
                 ],
 
-                linewidth=1.0,
+                linewidth=2.0,
 
-                alpha=0.90,
+                alpha=0.95,
 
                 label=intensity,
             )
@@ -989,6 +1180,7 @@ def main():
 
 
     ax.legend(
+
         handles=legend_items,
 
         title="Intensity",
@@ -997,19 +1189,25 @@ def main():
 
         frameon=True,
 
-        framealpha=0.92,
+        framealpha=0.94,
+
+        facecolor="#f4f5f5",
+
+        edgecolor="#d0d4d5",
     )
 
 
-    # ==================================================
+    # ========================================================
     # SAVE
-    # ==================================================
+    # ========================================================
 
     OUT.mkdir(
         exist_ok=True
     )
 
+
     fig.savefig(
+
         OUT / PICTURE,
 
         dpi=180,
@@ -1026,9 +1224,10 @@ def main():
     plt.show()
 
 
-# ==================================================
+# ============================================================
 # RUN
-# ==================================================
+# ============================================================
 
 if __name__ == "__main__":
+
     main()
